@@ -256,7 +256,7 @@ unput:function (ch) {
         var len = ch.length;
         var lines = ch.split(/(?:\r\n?|\n)/g);
 
-        this._input = ch + this._input;
+        //this._input = ch + this._input;
         this.yytext = this.yytext.substr(0, this.yytext.length - len);
         //this.yyleng -= len;
         this.offset -= len;
