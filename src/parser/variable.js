@@ -42,25 +42,30 @@ module.exports = function(api, tokens, EOF) {
 
       // static mode
       if (this.token === tokens.T_DOUBLE_COLON) {
-        var getter = null;
-        if (this.next().is([tokens.T_VARIABLE, '$'])) {   
-          getter = this.read_reference_variable(encapsed);
-        } else if (
-          this.token === tokens.T_STRING
-          || this.token === tokens.T_CLASS
-        ) {
-          getter = this.text();
-          this.next();
-        } else {
-          this.error([tokens.T_VARIABLE, tokens.T_STRING]);
-        }
-        if (result[0] != 'ns') {
-          result = ['lookup', 'class', result];
-        }
-        result = ['static', 'get', result, getter];
+        result = this.read_static_getter(result, encapsed);
       }
 
       return this.recursive_variable_chain_scan(result, read_only, encapsed);
+    }
+
+    // resolves a static call
+    ,read_static_getter: function(from, encapsed) {
+      var getter = null;
+      if (this.next().is([tokens.T_VARIABLE, '$'])) {   
+        getter = this.read_reference_variable(encapsed);
+      } else if (
+        this.token === tokens.T_STRING
+        || this.token === tokens.T_CLASS
+      ) {
+        getter = this.text();
+        this.next();
+      } else {
+        this.error([tokens.T_VARIABLE, tokens.T_STRING]);
+      }
+      if (from[0] != 'ns') {
+        from = ['lookup', 'class', from];
+      }
+      return ['static', 'get', from, getter];
     }
 
     ,recursive_variable_chain_scan: function(result, read_only, encapsed) {
@@ -96,7 +101,15 @@ module.exports = function(api, tokens, EOF) {
             switch(this.next().token) {
               case tokens.T_STRING:
                 what = ['string', this.text()];
-                this.next();
+                var tok = this.next().token;
+                if (tok === tokens.T_VARIABLE) {
+                  // fix $obj->var_$prop
+                  what = ['bin', '.', what, ['var', this.text()]];
+                } else if (tok === '{') {
+                  // fix $obj->var_{$prop}
+                  what = ['bin', '.', what, this.next().read_expr()];
+                  this.expect('}').next();
+                }
                 break;
               case tokens.T_VARIABLE:
                 what = ['var', this.text()];

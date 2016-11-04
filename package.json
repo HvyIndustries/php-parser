@@ -1,12 +1,12 @@
 {
   "name": "php-parser",
-  "version": "0.0.10",
+  "version": "0.1.1",
   "description": "PHP parser",
   "main": "main.js",
   "scripts": {
-    "build": "cd ./bin && node ./build.js",
+    "bench": "node --expose-gc bin/bench.js",
     "test": "node --stack-size=5000 bin/test.js -r -d test/",
-    "cover": "node --stack-size=5000 node_modules/istanbul/lib/cli.js cover -x \"**/bin/**\" bin/test.js -- -r -d test/ ",
+    "cover": "node --stack-size=5000 node_modules/istanbul/lib/cli.js cover -x \"**/bin/**\" bin/test.js -- -r -d test/ -m test/functional/",
     "mocha": "node node_modules/mocha/bin/mocha test/functional  --stack-size=5000"
   },
   "repository": {
@@ -36,7 +36,7 @@
     "jison": "^0.4.15",
     "jison-lex": "~0.3.4",
     "lex-parser": "~0.1.4",
-    "memwatch-next": "^0.2.7",
+    "memwatch-next": "^0.3.0",
     "mocha": "^2.0.1",
     "should": "^8.3.0"
   }

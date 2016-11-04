@@ -185,7 +185,16 @@ module.exports = function(engine) {
       this.next();
       this.ast = ['program', []];
       while(this.token != EOF) {
-        this.ast[1].push(this.read_start());
+        var node = this.read_start();
+        if (node !== null) {
+          if (typeof node[0] !== 'string') {
+            node.forEach(function(item) {
+              this.ast[1].push(item);
+            }.bind(this));
+          } else {
+            this.ast[1].push(node);
+          }
+        }
       }
       return this.ast;
     }
@@ -307,6 +316,7 @@ module.exports = function(engine) {
         + this.lexer.yylloc.first_line
         + ' : '
         + getTokenName(this.token)
+        + ">" + this.lexer.yytext + "<"
         + ' @' + stack[3].trim()
       );
       return this;

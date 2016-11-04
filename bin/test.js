@@ -9,7 +9,9 @@
 var util    = require('util');
 var fs      = require('fs');
 var path    = require('path');
+
 var engine  = require('../main');
+engine.lexer.short_tags = true;
 
 // help screen
 function printHelp() {
@@ -17,9 +19,12 @@ function printHelp() {
   console.log('');
   console.log('  -f <file>                      Parse and test the specified file');
   console.log('  -d <path>                      Parse each file in the specified path');
+  console.log('  -m <path>                      Run mocha tests on the specified path');
   console.log('  -r                             Use recursivity with the specified path');
   console.log('  -e                             Eval the specified input and shows AST');
   console.log('  -v                             Enable verbose mode and show debug');
+  console.log('  -s                             Silent error mode, and try to suppress errors');
+  console.log('  --asp_short                    Test with short tags');
   console.log('  -h, --help                     Print help and exit');
 }
 
@@ -35,7 +40,9 @@ var options = {
   filename: null,
   path: null,
   recursive: false,
-  evalCode: false
+  evalCode: false,
+  aspShort: false,
+  mocha: false
 };
 
 var args = process.argv.slice(2); // Trim 'node' and the script path.
@@ -62,15 +69,29 @@ while (args.length > 0 && isOption(args[0])) {
       options.evalCode = args[0];
       break;
 
+    case '--asp_short':
+      engine.lexer.asp_tags = true;
+      options.aspShort = true;
+      break;
+
     case '--debug':
     case '-v':
       engine.parser.locations = true;
       engine.parser.debug = true;
       break;
 
+    case '-s':
+      engine.parser.suppressErrors = true;
+      break;
+
     case '-d':
       nextArg();
       options.path = args[0];
+      break;
+
+    case '-m':
+      nextArg();
+      options.mocha = args[0];
       break;
 
     case '-r':
@@ -97,7 +118,7 @@ if ( args.length > 0 ) {
     abort('Too many arguments.');
   }
 }
-if ( !options.filename && !options.path && !options.evalCode ) {
+if ( !options.filename && !options.path && !options.evalCode && !options.mocha ) {
   abort('Expecting a filename or a path.');
 }
 
@@ -170,110 +191,149 @@ function test(filename) {
   }
 }
 
-// run tests
-console.log('\n*** START TESTING ***\n');
-if (options.evalCode) {
-  var EOF = engine.lexer.EOF;
-  engine.lexer.mode_eval = true;
-  engine.lexer.all_tokens = false;
-  engine.lexer.setInput(options.evalCode);
-  var token = engine.lexer.lex() || EOF;
-  var names = engine.tokens.values;
-  var tokens = [];
-  while(token != EOF) {
-    if (names[token]) {
-      tokens.push(names[token]);
-    } else {
-      tokens.push(token);
-    }
-    token = engine.lexer.lex() || EOF;
-  }  
-  console.log('-- TOKENS : ');
-  console.log(tokens.join(' '));
+if (options.mocha) {
+  var Mocha = require('mocha'), path = require('path');
   
-  var ast = engine.parser.parse(options.evalCode);
-  console.log('-- AST : ');
-  console.log(
-    util.inspect(
-      ast, { 
-        showHidden: false, 
-        depth: 20, 
-        colors: true 
+  // Instantiate a Mocha instance.
+  var mocha = new Mocha();
+
+  // Add each .js file to the mocha instance
+  fs.readdirSync(options.mocha).filter(function(file){
+      // Only keep the .js files
+      return file.substr(-3) === '.js';
+  }).forEach(function(file){
+      mocha.addFile(
+          path.join(options.mocha, file)
+      );
+  });
+  
+  // Run the tests.
+  mocha.run(function(failures){
+    if (failures) {
+      process.on('exit', function () {
+        process.exit(failures);  // exit with non-zero status if there were failures
+      });
+    } else {
+      runTests();
+    }
+  });
+} else runTests();
+
+// run tests
+function runTests() {
+
+  console.log('\n*** START TESTING ***\n');
+  if (options.evalCode) {
+    var EOF = engine.lexer.EOF;
+    engine.lexer.mode_eval = true;
+    engine.lexer.all_tokens = false;
+    engine.lexer.setInput(options.evalCode);
+    var token = engine.lexer.lex() || EOF;
+    var names = engine.tokens.values;
+    var tokens = [];
+    while(token != EOF) {
+      if (names[token]) {
+        tokens.push(names[token]);
+      } else {
+        tokens.push(token);
       }
-    )
-  );
-
-} else if (options.filename) {
-  if (!test(options.filename)) {
-    abort('Error: test FAILED !!!');
-  } else {
-    console.log('Success');
-  }
-} else if (options.path) {
-
-  var files = [];
-  var scanFiles = function(path) {
-    var items = fs.readdirSync(path);
-    for(var i = 0; i < items.length; i ++) {
-      var file = items[i];
-      if (file[0] != '.') {
-        var stat = fs.statSync(path + file);
-        if (!stat.isDirectory()) {
-          files.push(path + file);
-        } else if (options.recusive) {
-          scanFiles(path + file + '/');
+      token = engine.lexer.lex() || EOF;
+    }  
+    console.log('-- TOKENS : ');
+    console.log(tokens.join(' '));
+    
+    var ast = engine.parser.parse(options.evalCode);
+    console.log('-- AST : ');
+    console.log(
+      util.inspect(
+        ast, { 
+          showHidden: false, 
+          depth: 20, 
+          colors: true 
+        }
+      )
+    );
+  
+  } else if (options.filename) {
+    if (!test(options.filename)) {
+      abort('Error: test FAILED !!!');
+    } else {
+      console.log('Success');
+    }
+  } else if (options.path) {
+  
+    var files = [];
+    var scanFiles = function(path) {
+      var items = fs.readdirSync(path);
+      for(var i = 0; i < items.length; i ++) {
+        var file = items[i];
+        if (file[0] != '.') {
+          var stat = fs.statSync(path + file);
+          if (!stat.isDirectory()) {
+            files.push(path + file);
+          } else if (options.recusive) {
+            scanFiles(path + file + '/');
+          }
         }
       }
-    }
-  };
-
-  console.log('Scan files ' + options.path);
-  scanFiles(options.path);
-  console.log('Found ' + files.length + ' items');
-
-  var stats = {
-    time: process.hrtime(),
-    progress: 0,
-    code: 0
-  };
+    };
   
-  function secondsToTime(secs)
-  {
-      secs = Math.round(secs);
-      var hours = Math.floor(secs / (60 * 60));
-      if (hours < 10) hours = '0' + hours;
-      var divisor_for_minutes = secs % (60 * 60);
-      var minutes = Math.floor(divisor_for_minutes / 60);
-      if (minutes < 10) minutes = '0' + minutes;
-      var divisor_for_seconds = divisor_for_minutes % 60;
-      var seconds = Math.ceil(divisor_for_seconds);
-      if (seconds < 10) seconds = '0' + seconds;
-      return hours + ':' + minutes + ':' + seconds;
-  }
-  // running
-  for(var i = 0; i < files.length; i++) {
-    var file = files[i];  
-    if (i / files.length * 100 > stats.progress + 2) {
-      stats.progress = i / files.length * 100;
-      var now = process.hrtime(stats.time);
-      var remain = (now[0] / stats.progress) * (100 - stats.progress);
-      console.log(
-        'Progress ', 
-        Math.round(stats.progress) + '%', 
-        ' remains ', 
-        secondsToTime(remain)
-      );
+    console.log('Scan files ' + options.path);
+    scanFiles(options.path);
+    console.log('Found ' + files.length + ' items');
+  
+    var stats = {
+      time: process.hrtime(),
+      progress: 0,
+      code: 0
+    };
+    
+    function secondsToTime(secs)
+    {
+        secs = Math.round(secs);
+        var hours = Math.floor(secs / (60 * 60));
+        if (hours < 10) hours = '0' + hours;
+        var divisor_for_minutes = secs % (60 * 60);
+        var minutes = Math.floor(divisor_for_minutes / 60);
+        if (minutes < 10) minutes = '0' + minutes;
+        var divisor_for_seconds = divisor_for_minutes % 60;
+        var seconds = Math.ceil(divisor_for_seconds);
+        if (seconds < 10) seconds = '0' + seconds;
+        return hours + ':' + minutes + ':' + seconds;
     }
-    try {
-      test(file);
-    } catch(e) {
-      stats.code = 1;
-      console.error('Error on ' + file);
-      console.error(e);
+    // running
+    for(var i = 0; i < files.length; i++) {
+      var file = files[i];  
+      if (i / files.length * 100 > stats.progress + 2) {
+        stats.progress = i / files.length * 100;
+        var now = process.hrtime(stats.time);
+        var remain = (now[0] / stats.progress) * (100 - stats.progress);
+        console.log(
+          'Progress ', 
+          Math.round(stats.progress) + '%', 
+          ' remains ', 
+          secondsToTime(remain)
+        );
+      }
+      try {
+        test(file);
+      } catch(e) {
+        stats.code = 1;
+        console.error('Error on ' + file);
+        console.error(e);
+      }
     }
+  
+    var duration = process.hrtime(stats.time);
+    console.log('\n--------------------------------------');
+    console.log('Tests duration : ' + duration[0] +'sec');
+  
+    if (stats.code === 0) {
+      console.log('I AM HAPPY !');
+    }
+  
+    process.exit(stats.code);
   }
-  if (stats.code === 0) {
-    console.log('I AM HAPPY !');
-  }
-  process.exit(stats.code);
+
 }
+

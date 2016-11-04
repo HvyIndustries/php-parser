@@ -42,6 +42,7 @@ module.exports = function(api, tokens, EOF) {
 
         case tokens.T_IS_SMALLER_OR_EQUAL:  return ['bool', '<=', expr, this.next().read_expr()];
         case tokens.T_IS_GREATER_OR_EQUAL:  return ['bool', '>=', expr, this.next().read_expr()];
+        case tokens.T_SPACESHIP:            return ['bool', '<=>', expr, this.next().read_expr()];
         case tokens.T_INSTANCEOF:           return ['bool', '?', expr, this.next().read_expr()];
         
         // extra operations : 
@@ -69,7 +70,7 @@ module.exports = function(api, tokens, EOF) {
       switch(this.token) {
 
         case '@':
-          return ['silence', this.next().read_expr()];
+          return ['silent', this.next().read_expr()];
 
         case '-':
         case '+':
@@ -87,19 +88,17 @@ module.exports = function(api, tokens, EOF) {
           } else if (this.token === tokens.T_CURLY_OPEN || this.token === '[') {
             // @fixme - should avoid a new token (could be resolved)
             return ['deference', expr, this.read_encapsed_string_item()];
+          } else if (this.token === '(') {
+            // https://github.com/php/php-src/blob/master/Zend/zend_language_parser.y#L1118
+            return ['call', expr, this.read_function_argument_list()];
           } else {
-            return expr;            
+            return expr;
           }
 
         case '`':
-          var expr = null;
+          // https://github.com/php/php-src/blob/master/Zend/zend_language_parser.y#L1048
           var result = this.node('sys');
-          if (this.next().token === tokens.T_ENCAPSED_AND_WHITESPACE) {
-            expr = this.text();
-            this.next().expect('`').next();
-          } else if (this.token !== '`' ) {
-            expr = this.read_encaps_list();
-          }
+          var expr = this.next().read_encapsed_string('`');
           return result('shell', expr);
 
         case tokens.T_LIST:
@@ -278,17 +277,39 @@ module.exports = function(api, tokens, EOF) {
     }
     /**
      * <ebnf>
-     *    new_expr ::= T_NEW namespace_name function_argument_list
+     *    new_expr ::= T_NEW (namespace_name function_argument_list) | (T_CLASS ... class declaration)
      * </ebnf>
+     * https://github.com/php/php-src/blob/master/Zend/zend_language_parser.y#L850
      */
     ,read_new_expr: function() {
       var result = this.node('new');
-      var name = this.read_class_name_reference();
-      var args = [];
-      if (this.token === '(') {
-        args = this.read_function_argument_list();
+      if (this.token === tokens.T_CLASS) {
+        // Annonymous class declaration
+        var propExtends = false, propImplements = false;
+        if (this.next().token == tokens.T_EXTENDS) {
+          propExtends = this.next().read_namespace_name();
+        }
+        if (this.token == tokens.T_IMPLEMENTS) {
+          propImplements = this.next().read_list(
+            this.read_namespace_name,
+            ','
+          );
+        }
+        return result(
+          false           // class name => false : means it's an annonymous class
+          ,propExtends
+          ,propImplements
+          ,this.expect('{').next().read_class_body()
+        );
+      } else {
+        // Already existing class
+        var name = this.read_class_name_reference();
+        var args = [];
+        if (this.token === '(') {
+          args = this.read_function_argument_list();
+        }
+        return result(name, args);
       }
-      return result(name, args);
     }
     /**
      * Reads a class name
@@ -302,7 +323,7 @@ module.exports = function(api, tokens, EOF) {
       } else if (this.is('VARIABLE')) {
         return this.read_variable(true);
       } else {
-        this.expect([T_STRING, 'VARIABLE']);
+        this.expect([tokens.T_STRING, 'VARIABLE']);
       }
     }
     /**
