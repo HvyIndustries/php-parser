@@ -51,7 +51,9 @@ module.exports = function(api, tokens, EOF) {
         case tokens.T_TRAIT:
           return this.read_trait();
         case tokens.T_USE:
-          return this.read_use_statements(0);
+          var expr = this.read_use_statements();
+          this.expect(';').next();
+          return expr;
         case tokens.T_CONST:
           return this.next().read_const_list();
         case tokens.T_NAMESPACE:
@@ -88,6 +90,20 @@ module.exports = function(api, tokens, EOF) {
       }, ',');
       this.expectEndOfStatement();
       return ['const', result];
+    }
+    /**
+     * Reads a list of constants declaration
+     * <ebnf>
+     *   const_list ::= T_CONST T_STRING '=' expr (',' T_STRING '=' expr)*
+     * </ebnf>
+     */
+    ,read_declare_list: function() {
+      return this.read_list(function() {
+        this.expect(tokens.T_STRING);
+        var name = this.text();
+        this.next().expect('=').next();
+        return [name, this.read_expr()];
+      }, ',');
     }
     /**
      * reads a simple inner statement
@@ -167,7 +183,7 @@ module.exports = function(api, tokens, EOF) {
         case tokens.T_STATIC:
           if (this.next().token === tokens.T_DOUBLE_COLON) {
             // static keyword for a class 
-            this.lexer.unput('static::');
+            this.lexer.unput(8);
             var expr = this.next().read_expr();
             this.expect(';').next();
             return expr;
@@ -200,11 +216,12 @@ module.exports = function(api, tokens, EOF) {
           return ['sys', 'unset', items];
 
         case tokens.T_DECLARE:
+          var result = this.node('declare');
           this.next().expect('(').next();
-          var options = this.read_list(this.read_const_list, ',');
+          var options = this.read_declare_list();
           this.expect(')').next();
           var body = this.read_statement();
-          return ['declare', options, body]
+          return result(options, body);
           break;
 
         case tokens.T_TRY:
@@ -223,20 +240,22 @@ module.exports = function(api, tokens, EOF) {
         case tokens.T_STRING:
           var label = this.text();
           if (this.next().token === ':') {
+            var result = this.node('label');
             this.next();
-            return ['label', label];
+            return result(label);
           } else {
             // default fallback expr
-            this.lexer.unput(label + this.text());
+            this.lexer.unput(label.length + this.text().length);
             var expr = this.next().read_expr();
             this.expect([';', tokens.T_CLOSE_TAG]).next();
             return expr;
           }
 
         case tokens.T_GOTO:
+          var result = this.node('goto');
           var label = this.next().expect(tokens.T_STRING).text();
           this.next().expectEndOfStatement();
-          return ['goto', label];
+          return result(label);
 
         default: // default fallback expr
           var expr = this.read_expr();
